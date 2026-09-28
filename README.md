@@ -8,6 +8,14 @@ Requires Python 3.10+. Run commands from this checkout; no installation or API k
 
 The solution is named **logVeil**; its Python module and CLI commands currently use `pii_guard` and `pii-guard`, and custom rules use the `PII_GUARD_RULES` environment variable.
 
+## Background
+
+Developers in the financial industry work with confidential customer information, including identity numbers, bank account details, payment card numbers, and contact information. Protecting this data is essential throughout development, testing, and production—including in application logs.
+
+Routine debugging can accidentally expose sensitive information through a logged customer object, request payload, or exception message. These leaks can be difficult to spot during code review, particularly when the data reaches a logging statement indirectly.
+
+Developers need a tool that is simple enough to use regularly and convenient enough to fit into their existing workflow. logVeil brings scanning, masked evidence, source locations, and masking fixes into a lightweight CLI with a local web interface. Custom detection rules let teams cover their own data formats, while rerun verification and CI checks help catch leaks early and keep confidentiality checks part of everyday development.
+
 ## Quick start: view results on localhost
 
 ```sh
