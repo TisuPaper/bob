@@ -4,6 +4,49 @@ A dependency-free Python CLI for the **PII Log Leak Detector** use case. It scan
 
 Requires Python 3.10+. Run commands from this checkout; no installation or API key is required.
 
+## Architecture
+
+```mermaid
+flowchart TD
+    User["Developer / IBM Bob terminal / CI"] --> CLI["CLI entry point<br/>__main__.py → cli.py"]
+
+    subgraph Scan["Scan and report"]
+        Source["Python source files"] --> Static["scanner.py · static_scan<br/>AST logging-call heuristics"]
+        Logs["Captured text / JSONL logs"] --> Runtime["scanner.py · log_scan<br/>PII matches + source metadata"]
+        Static --> Findings["Findings<br/>Heuristic risks or observed patterns"]
+        Runtime --> Findings
+        Findings --> Baseline["Optional baseline filtering<br/>Location + type fingerprints"]
+        Baseline --> Report["Masked text / JSON report<br/>Source line when available<br/>CI exit code: 0 / 1 / 2"]
+    end
+
+    CLI -->|scan| Static
+    CLI -->|scan --logs| Runtime
+
+    subgraph Repair["Repair and verify"]
+        Fix["fixer.py<br/>Rewrite supported logging calls"] --> Preview["Masked diff preview"]
+        Fix -->|--apply| Patched["Source wrapped with safe_log"]
+        Patched --> Run["Run application / tests again"]
+        Run --> Safe["runtime.py · safe_log<br/>Format message and exception, then redact"]
+        Safe --> Formatter["Python logging + JsonFormatter<br/>Preserve source path and line"]
+        Formatter --> Fresh["Fresh JSONL logs"]
+    end
+
+    CLI -->|fix| Fix
+    Source --> Fix
+    Fresh -->|rescan| Runtime
+
+    Rules["detectors.py<br/>Email · Malaysian IC · Luhn card check<br/>Contextual account number · redaction"]
+    Rules -.->|literal checks| Static
+    Rules -.->|detect| Runtime
+    Rules -.->|redact| Safe
+    Rules -.->|redact output| Report
+    Rules -.->|redact output| Preview
+```
+
+Solid arrows show inputs and execution flow; dotted arrows show shared detector and redaction logic. Static scanning reads source without executing it. Runtime scanning reads captured logs and uses their `source` and `line` metadata to locate the logging call; plain text logs without that metadata have an unknown source.
+
+The `demo` command orchestrates **copy example → run → scan → apply fix → rerun → rescan**, then compares finding counts and service results. It operates in a temporary directory. IBM Bob is the developer's terminal/review environment; the CLI performs detection and deterministic repairs locally without a Bob API integration.
+
 ## One-command demo
 
 ```sh
