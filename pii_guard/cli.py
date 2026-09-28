@@ -5,9 +5,11 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from .detectors import redact
+from .detectors import ACTIVE_RULES, get_rules, load_rules, redact
 from .fixer import fix
 from .scanner import fingerprint, log_scan, static_scan
+from .web_report import write_html
+from .server import serve
 
 
 def report(findings, as_json=False):
@@ -23,7 +25,7 @@ def report(findings, as_json=False):
         print(f"    {f['path']} ({f['confidence']})")
 
 
-def demo():
+def demo(html=None):
     template = Path(__file__).resolve().parent.parent / "examples" / "bank_service.py"
     if not template.exists():
         raise ValueError("Run demo from the source checkout (example service required).")
@@ -47,6 +49,9 @@ def demo():
         print(f"Detected PII values: {len(before)} → {len(after)}")
         unchanged = before_result == after_result
         print(f"Service results unchanged: {unchanged}")
+        if html:
+            write_html(html, after, before=before)
+            print(f"Open report: {Path(html).resolve().as_uri()}")
         return 0 if before_sites == 3 and not after and unchanged else 1
 
 
@@ -57,16 +62,30 @@ def main(argv=None):
     scan.add_argument("source", nargs="?", help="Python file or directory (static heuristics)")
     scan.add_argument("--logs", action="append", default=[], help="Text or JSONL log; repeatable")
     scan.add_argument("--json", action="store_true")
+    scan.add_argument("--html", metavar="PATH", help="Write a standalone HTML results page")
     scan.add_argument("--baseline", help="Only report fingerprints absent from this baseline")
     scan.add_argument("--write-baseline", help="Write a baseline of all current findings")
     repair = commands.add_parser("fix", help="Preview masking changes; use --apply to write")
     repair.add_argument("source")
     repair.add_argument("--apply", action="store_true")
-    commands.add_parser("demo", help="Run scan → fix → rerun in a temporary copy")
+    demo_parser = commands.add_parser("demo", help="Run scan → fix → rerun in a temporary copy")
+    demo_parser.add_argument("--html", metavar="PATH", help="Write before/after HTML results")
+    serve_parser = commands.add_parser("serve", help="Serve an HTML report on localhost")
+    serve_parser.add_argument("report", nargs="?", default="scan-results.html")
+    serve_parser.add_argument("--port", type=int, default=8000)
+    serve_parser.add_argument("--rules", default="rules/custom.json", help="Custom rule file editable through the browser")
+    for command in (scan, repair, demo_parser):
+        command.add_argument("--rules", metavar="PATH", help="Add custom detection rules from JSON")
     args = parser.parse_args(argv)
+    token = None
     try:
+        if args.command != "serve":
+            rules_path = getattr(args, "rules", None)
+            token = ACTIVE_RULES.set(load_rules(rules_path) if rules_path else get_rules())
+        if args.command == "serve":
+            return serve(args.report, args.port, args.rules)
         if args.command == "demo":
-            return demo()
+            return demo(args.html)
         if args.command == "fix":
             changes = fix(args.source, args.apply)
             for _, diff in changes:
@@ -87,9 +106,18 @@ def main(argv=None):
         if args.write_baseline:
             Path(args.write_baseline).write_text(json.dumps(sorted({fingerprint(f) for f in findings}), indent=2) + "\n")
         visible = [f for f in findings if fingerprint(f) not in baseline]
+        if args.html:
+            write_html(args.html, visible, suppressed=len(findings) - len(visible))
         report(visible, args.json)
+        if args.html:
+            print(f"Open report: {Path(args.html).resolve().as_uri()}",
+                  file=sys.stderr if args.json else sys.stdout)
         return 1 if visible else 0
     except (OSError, SyntaxError, ValueError) as exc:
         # Do not echo exception details, which can contain source text or PII.
-        print(f"pii-guard: {type(exc).__name__}: input could not be processed; check paths, Python syntax, and JSON.", file=sys.stderr)
+        print(f"pii-guard: {type(exc).__name__}: input could not be processed; check paths, Python syntax, and JSON/rule configuration.", file=sys.stderr)
         return 2
+
+    finally:
+        if token is not None:
+            ACTIVE_RULES.reset(token)

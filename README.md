@@ -1,51 +1,74 @@
-# PII Log Guard
+# logVeil
 
-A dependency-free Python CLI for the **PII Log Leak Detector** use case. It scans Python logging calls and captured logs, reports masked evidence with source locations, previews/applies masking repairs, and verifies a fresh run.
+logVeil scans code and logs for sensitive data, traces leaks to source lines where available, applies masking fixes, and provides a local web interface to review results, manage custom detection rules, and verify clean reruns.
+
+A dependency-free Python CLI for the **PII Log Leak Detector** use case, with code scanning, runtime log detection, masked reports, and CI baseline support.
 
 Requires Python 3.10+. Run commands from this checkout; no installation or API key is required.
+
+The solution is named **logVeil**; its Python module and CLI commands currently use `pii_guard` and `pii-guard`, and custom rules use the `PII_GUARD_RULES` environment variable.
+
+## Quick start: view results on localhost
+
+```sh
+# Generate the demo report, including findings before and after masking
+python3 -m pii_guard demo --html scan-results.html
+
+# Host the report locally
+python3 -m pii_guard serve scan-results.html
+```
+
+Open **[http://localhost:8000/](http://localhost:8000/)** while the server is running. The CLI also prints this clickable link. The page shows masked evidence, source lines, suggested fixes, search/filter controls, and the demo's **7 → 0** comparison.
+
+Press **Ctrl+C** to stop the server. To use another port:
+
+```sh
+python3 -m pii_guard serve scan-results.html --port 8080
+```
+
+Then open [http://localhost:8080/](http://localhost:8080/). The server displays the existing report; it does not run scans or apply fixes from the browser. Regenerate the HTML in another terminal and refresh the page to see new results.
 
 ## Architecture
 
 ```mermaid
-flowchart TD
-    User["Developer / IBM Bob terminal / CI"] --> CLI["CLI entry point<br/>__main__.py → cli.py"]
-
-    subgraph Scan["Scan and report"]
-        Source["Python source files"] --> Static["scanner.py · static_scan<br/>AST logging-call heuristics"]
-        Logs["Captured text / JSONL logs"] --> Runtime["scanner.py · log_scan<br/>PII matches + source metadata"]
-        Static --> Findings["Findings<br/>Heuristic risks or observed patterns"]
-        Runtime --> Findings
-        Findings --> Baseline["Optional baseline filtering<br/>Location + type fingerprints"]
-        Baseline --> Report["Masked text / JSON report<br/>Source line when available<br/>CI exit code: 0 / 1 / 2"]
-    end
-
-    CLI -->|scan| Static
-    CLI -->|scan --logs| Runtime
-
-    subgraph Repair["Repair and verify"]
-        Fix["fixer.py<br/>Rewrite supported logging calls"] --> Preview["Masked diff preview"]
-        Fix -->|--apply| Patched["Source wrapped with safe_log"]
-        Patched --> Run["Run application / tests again"]
-        Run --> Safe["runtime.py · safe_log<br/>Format message and exception, then redact"]
-        Safe --> Formatter["Python logging + JsonFormatter<br/>Preserve source path and line"]
-        Formatter --> Fresh["Fresh JSONL logs"]
-    end
-
-    CLI -->|fix| Fix
-    Source --> Fix
-    Fresh -->|rescan| Runtime
-
-    Rules["detectors.py<br/>Email · Malaysian IC · Luhn card check<br/>Contextual account number · redaction"]
-    Rules -.->|literal checks| Static
-    Rules -.->|detect| Runtime
-    Rules -.->|redact| Safe
-    Rules -.->|redact output| Report
-    Rules -.->|redact output| Preview
+flowchart LR
+    Code["Python code"] --> Scan["PII scanner"]
+    Logs["Test-run logs"] --> Scan
+    Rules["Built-in + custom JSON rules"] --> Scan
+    Scan --> Results["Masked results<br/>Webpage / CLI / CI"]
+    Results --> Review["Review and apply fixes"]
+    Review --> Rerun["Rerun application / tests"]
+    Rerun --> Logs
 ```
 
-Solid arrows show inputs and execution flow; dotted arrows show shared detector and redaction logic. Static scanning reads source without executing it. Runtime scanning reads captured logs and uses their `source` and `line` metadata to locate the logging call; plain text logs without that metadata have an unknown source.
+The scanner checks code for risky logging calls and logs for email, IC, card, account and configured custom patterns. Structured logs identify the source file and line. Repairs use the same detection rules to mask supported logging calls before a fresh run verifies the result. IBM Bob can run and review this local workflow; no Bob API is required.
 
-The `demo` command orchestrates **copy example → run → scan → apply fix → rerun → rescan**, then compares finding counts and service results. It operates in a temporary directory. IBM Bob is the developer's terminal/review environment; the CLI performs detection and deterministic repairs locally without a Bob API integration.
+## Results webpage
+
+Generate a standalone webpage with the demo's before/after results:
+
+```sh
+python3 -m pii_guard demo --html scan-results.html
+```
+
+Click the `Open report: file:///.../scan-results.html` link printed by the CLI (Cmd-click or Ctrl-click, depending on your terminal), or open `scan-results.html` in your browser. With `--json`, the link goes to stderr so stdout remains valid JSON. The page shows finding counts, detected data types, masked evidence, source locations, expandable traces and suggested fixes. Search and filter by type or evidence. The demo includes a before/after comparison; its temporary source paths are reference locations, not links to retained files.
+
+To open the report through a localhost link:
+
+```sh
+python3 -m pii_guard serve scan-results.html
+# Open report: http://localhost:8000/
+```
+
+Keep this command running while viewing the page; press Ctrl+C to stop. Use `--port 8080` if port 8000 is occupied. The server binds only to loopback, serves the selected report, and provides a custom-rules editor. Regenerate the report in another terminal and refresh the browser to see updates.
+
+For your own code and captured logs:
+
+```sh
+python3 -m pii_guard scan examples/bank_service.py --logs test-run.jsonl --html scan-results.html
+```
+
+The report works offline with no server or external assets. Generate it again to refresh the results. Scan exit codes remain unchanged, including exit 1 when findings are reported. With `--baseline`, the page shows only new findings and the suppressed count.
 
 ## One-command demo
 
@@ -126,6 +149,83 @@ python3 -m pii_guard scan examples --logs test-run.jsonl --baseline baseline.jso
 ```
 
 Exit codes: **0** no unbaselined findings, **1** findings, **2** invalid/unreadable input. Baselines contain location/type fingerprints, never payloads or payload-derived hashes. Fingerprints depend on path, line, origin and type: use stable paths in CI. Moving a line is a new finding; another value of the same type at an accepted location is suppressed. Review accepted locations accordingly.
+
+## Add your own detection patterns
+
+Detectors use an extensible rule registry. Add a JSON configuration to detect organisation-specific IDs, tokens, or other formats **without editing Python code**. Custom rules extend the built-in rules; the same registry powers code-literal checks, log scanning, report masking, and `safe_log` repairs. New rule names appear automatically in webpage filters and CI fingerprints.
+
+Start with [rules/custom.json](rules/custom.json), which includes employee IDs, patient IDs and contextual API tokens:
+
+```json
+{
+  "version": 1,
+  "rules": [
+    {
+      "kind": "EMPLOYEE_ID",
+      "pattern": "\\bEMP-[0-9]{6}\\b"
+    },
+    {
+      "kind": "API_TOKEN",
+      "pattern": "(?i)\\bapi_token\\s*[:=]\\s*(?P<secret>[A-Za-z0-9_-]{16,})",
+      "group": "secret"
+    }
+  ]
+}
+```
+
+For example, `EMP-123456` becomes `[EMPLOYEE_ID REDACTED]`, and `api_token=abcdefghijklmnop` becomes `api_token=[API_TOKEN REDACTED]`.
+
+| Field | Purpose | Default |
+| --- | --- | --- |
+| `kind` | Unique uppercase identifier, e.g. `EMPLOYEE_ID`; cannot replace a built-in name | Required |
+| `pattern` | Python regular expression; escape backslashes in JSON, use `(?i)` for case-insensitive matching | Required |
+| `group` | Named capture containing only the sensitive value; surrounding context stays intact | Entire match |
+| `keep_last` | Number of trailing characters to retain, from 0 to 4; shorter values are fully masked | `0` (fully redact) |
+| `priority` | Higher values win when matches overlap; equal priorities follow registration order | `200` |
+| `validator` | Optional `"luhn"` checksum validator for numeric patterns | None |
+
+Built-in account rules have priority 200; other built-ins have priority 100. Built-ins are registered before custom rules. Use a higher priority for a specific rule that needs to take precedence. Overlapping lower-priority matches are skipped, so test overlaps carefully and prefer contextual patterns. Avoid matching redaction markers themselves.
+
+### Edit rules in your browser
+
+```sh
+python3 -m pii_guard serve scan-results.html --rules rules/custom.json
+```
+
+Open **[http://localhost:8000/rules](http://localhost:8000/rules)** or click **Edit custom detection rules** above the served report. Restart an already-running server to load this new feature.
+
+1. Add a rule using the name, regex, capture group and masking fields, or edit/remove entries in the JSON draft.
+2. Click **Validate draft** to check the configuration without writing it.
+3. Click **Save rules** to validate and atomically update the configured JSON file.
+4. Rerun your scan with `--rules rules/custom.json --html scan-results.html`, then refresh the results page.
+
+The editor defaults to `rules/custom.json`; `serve --rules PATH` chooses another existing file. Browser saves require a local session token and reject stale drafts if another editor has saved changes. The browser does not run scans or apply code repairs. Running applications that cache environment rules need to restart after a rule change.
+
+### Scan using custom rules
+
+```sh
+python3 -m pii_guard scan examples --logs test-run.jsonl --rules rules/custom.json --html scan-results.html
+python3 -m pii_guard serve scan-results.html
+```
+
+`--rules` is supported by `scan`, `fix`, and `demo`. Invalid regexes, duplicate names, missing capture groups and unknown configuration fields fail with exit code 2 rather than silently skipping a rule. Reports never include the regex configuration or original matched values.
+
+### Use the same rules when running repaired code
+
+For a complete scan → fix → rerun workflow, set the configuration for both the CLI and the application:
+
+```sh
+export PII_GUARD_RULES="$PWD/rules/custom.json"
+python3 -m pii_guard scan your_service.py --logs test-run.jsonl
+python3 -m pii_guard fix your_service.py
+python3 -m pii_guard fix your_service.py --apply
+# Run your application/tests again with this environment variable still set
+python3 -m pii_guard scan your_service.py --logs fresh-test-run.jsonl --html scan-results.html
+```
+
+Replace the example paths with your project paths. An explicit `--rules` overrides the environment for that CLI invocation only. **Repairs do not embed the configuration:** a separately launched application must have `PII_GUARD_RULES` set to use custom masking rules; otherwise it uses only the built-ins. The runtime compiles and caches environment rules per process; restart the application after changing its rule file.
+
+When adding a pattern, test a matching example, a harmless near-match, its redacted output, and a fresh application run. Keep rule files in version control. Treat regexes as trusted developer configuration: Python regex matching has no timeout here, so expensive patterns can slow scanning. This extension adds pattern coverage; it does not provide distributed scanning or whole-program tracing.
 
 ## Detection scope
 

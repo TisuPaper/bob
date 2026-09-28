@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "kind": "EMPLOYEE_ID",
+      "pattern": "\\bEMP-[0-9]{6}\\b"
+    },
+    {
+      "kind": "API_TOKEN",
+      "pattern": "(?i)\\bapi_token\\s*[:=]\\s*(?P<secret>[A-Za-z0-9_-]{16,})",
+      "group": "secret"
+    },
+    {
+      "kind": "PATIENT_ID",
+      "pattern": "\\bPAT-[0-9]{8}\\b",
+      "keep_last": 4
+    }
+  ]
+}
