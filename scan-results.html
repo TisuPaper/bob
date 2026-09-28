@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PII Log Guard — Scan results</title>
+<title>logVeil — Scan results</title>
 <style>
 :root{color-scheme:light;--ink:#132c37;--muted:#5c707b;--teal:#086b60;--line:#dce5e7}
 *{box-sizing:border-box}body{margin:0;background:#f3f6f7;color:var(--ink);font:16px/1.6 system-ui,sans-serif}
@@ -17,62 +17,18 @@ header p{color:#bfd0d5;margin:0;max-width:720px}main{max-width:1128px;margin:aut
 summary{cursor:pointer;font-size:14px;color:var(--teal);font-weight:650;padding-top:16px}dl{font-size:14px}dt{font-weight:650;margin-top:12px}dd{margin:3px 0;color:var(--muted);overflow-wrap:anywhere}footer{font-size:13px;color:var(--muted);margin-top:28px}h2{font-size:22px}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #32b29b;outline-offset:3px}[hidden]{display:none!important}
 @media(max-width:600px){.stats{gap:8px}.stat{padding:14px}.stat strong{font-size:28px}.verification{display:block}.verification .badge{margin-top:14px}input,select{width:100%}.controls label{width:100%}}
 </style></head><body>
-<header><div class="brand">PII LOG GUARD</div><h1>Know what reached your logs.</h1>
+<header><div class="brand">logVeil</div><h1>Know what reached your logs.</h1>
 <p>Review detected data types, masked evidence, and the logging statements that need attention.</p></header>
-<main><div class="row"><span class="badge">No detected findings</span><span class="muted">Generated 2026-09-28 12:03 UTC</span></div>
-<div class="stats"><div class="stat"><strong>0</strong><span>Observed PII matches after repair</span></div>
-<div class="stat"><strong>0</strong><span>Static risks after repair</span></div>
-<div class="stat"><strong>0</strong><span>Source locations with findings after repair</span></div></div>
-<section class="verification"><div><span class="eyebrow">FIX VERIFICATION</span>
-        <h2>7 before <span class="arrow">→</span> 0 after</h2>
-        <p>Fresh execution and logs after applying masking fixes. The findings below are the original scan.</p></div>
-        <span class="badge">Rerun clean</span></section><section id="results"><h2>Before repair</h2>
+<main><div class="row"><span class="badge">No detected findings</span><span class="muted">Generated 2026-09-28 16:56 UTC</span></div>
+<div class="stats"><div class="stat"><strong>0</strong><span>Observed PII matches</span></div>
+<div class="stat"><strong>0</strong><span>Static risks</span></div>
+<div class="stat"><strong>0</strong><span>Source locations with findings</span></div></div>
+<p class='muted'>Scanned 13 file(s), 0 stream(s), 0 log line(s). Skipped 0 file(s).</p><section id="results"><h2>Scan findings</h2>
 <p class="muted">0 finding(s) excluded by baseline. Static risks are heuristics; runtime matches are observed patterns.</p>
 <div class="controls"><label>Search location or evidence<input id="search" type="search" placeholder="Search findings…"></label>
-<label>Data type<select id="kind"><option value="">All types</option><option value="ACCOUNT">Account number (2)</option><option value="CARD">Payment card (1)</option><option value="EMAIL">Email address (3)</option><option value="MY_IC">Malaysian IC (1)</option></select></label>
+<label>Data type<select id="kind"><option value="">All types</option></select></label>
 <label>Evidence<select id="origin"><option value="">All evidence</option><option value="runtime">Runtime logs</option><option value="static">Static code</option></select></label></div>
-<p id="count" class="muted" aria-live="polite">7 findings shown</p><article class="finding" data-kind="EMAIL" data-origin="runtime">
-          <div class="row"><span class="badge">Email address</span><span class="muted">observed-pattern</span></div>
-          <h3>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/bank_service.py:18</h3><code>[EMAIL REDACTED]</code>
-          <details><summary>Trace &amp; suggested fix</summary>
-          <dl><dt>Detected in</dt><dd>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/test-run.jsonl:1</dd><dt>Observed path</dt><dd>logging call → captured log</dd>
-          <dt>Suggested fix</dt><dd>Mask at the logging call; rerun tests and scan fresh logs.</dd></dl></details></article>
-<article class="finding" data-kind="EMAIL" data-origin="runtime">
-          <div class="row"><span class="badge">Email address</span><span class="muted">observed-pattern</span></div>
-          <h3>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/bank_service.py:23</h3><code>[EMAIL REDACTED]</code>
-          <details><summary>Trace &amp; suggested fix</summary>
-          <dl><dt>Detected in</dt><dd>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/test-run.jsonl:2</dd><dt>Observed path</dt><dd>logging call → captured log</dd>
-          <dt>Suggested fix</dt><dd>Mask at the logging call; rerun tests and scan fresh logs.</dd></dl></details></article>
-<article class="finding" data-kind="MY_IC" data-origin="runtime">
-          <div class="row"><span class="badge">Malaysian IC</span><span class="muted">observed-pattern</span></div>
-          <h3>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/bank_service.py:23</h3><code>[MY_IC ****5678]</code>
-          <details><summary>Trace &amp; suggested fix</summary>
-          <dl><dt>Detected in</dt><dd>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/test-run.jsonl:2</dd><dt>Observed path</dt><dd>logging call → captured log</dd>
-          <dt>Suggested fix</dt><dd>Mask at the logging call; rerun tests and scan fresh logs.</dd></dl></details></article>
-<article class="finding" data-kind="CARD" data-origin="runtime">
-          <div class="row"><span class="badge">Payment card</span><span class="muted">observed-pattern</span></div>
-          <h3>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/bank_service.py:23</h3><code>[CARD ****1111]</code>
-          <details><summary>Trace &amp; suggested fix</summary>
-          <dl><dt>Detected in</dt><dd>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/test-run.jsonl:2</dd><dt>Observed path</dt><dd>logging call → captured log</dd>
-          <dt>Suggested fix</dt><dd>Mask at the logging call; rerun tests and scan fresh logs.</dd></dl></details></article>
-<article class="finding" data-kind="ACCOUNT" data-origin="runtime">
-          <div class="row"><span class="badge">Account number</span><span class="muted">observed-pattern</span></div>
-          <h3>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/bank_service.py:23</h3><code>[ACCOUNT ****7890]</code>
-          <details><summary>Trace &amp; suggested fix</summary>
-          <dl><dt>Detected in</dt><dd>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/test-run.jsonl:2</dd><dt>Observed path</dt><dd>logging call → captured log</dd>
-          <dt>Suggested fix</dt><dd>Mask at the logging call; rerun tests and scan fresh logs.</dd></dl></details></article>
-<article class="finding" data-kind="ACCOUNT" data-origin="runtime">
-          <div class="row"><span class="badge">Account number</span><span class="muted">observed-pattern</span></div>
-          <h3>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/bank_service.py:31</h3><code>[ACCOUNT ****7890]</code>
-          <details><summary>Trace &amp; suggested fix</summary>
-          <dl><dt>Detected in</dt><dd>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/test-run.jsonl:3</dd><dt>Observed path</dt><dd>logging call → captured log</dd>
-          <dt>Suggested fix</dt><dd>Mask at the logging call; rerun tests and scan fresh logs.</dd></dl></details></article>
-<article class="finding" data-kind="EMAIL" data-origin="runtime">
-          <div class="row"><span class="badge">Email address</span><span class="muted">observed-pattern</span></div>
-          <h3>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/bank_service.py:31</h3><code>[EMAIL REDACTED]</code>
-          <details><summary>Trace &amp; suggested fix</summary>
-          <dl><dt>Detected in</dt><dd>/var/folders/0v/sj5rr9hs36vggrjxtd_qkvd00000gn/T/pii-demo-8kteltvt/test-run.jsonl:3</dd><dt>Observed path</dt><dd>logging call → captured log</dd>
-          <dt>Suggested fix</dt><dd>Mask at the logging call; rerun tests and scan fresh logs.</dd></dl></details></article>
+<p id="count" class="muted" aria-live="polite">0 findings shown</p><div class="empty">No pattern matches in the inspected inputs. Review scan coverage and any command failure above.</div>
 <p id="no-match" class="empty" hidden>No findings match these filters.</p></section>
 <footer>Detected values are masked. No raw log payloads are embedded. Source locations come from code or log metadata.
 A clean scan covers only supported patterns and the logs supplied; it is not proof that all sensitive data is absent.</footer></main><script>

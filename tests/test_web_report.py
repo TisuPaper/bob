@@ -36,16 +36,14 @@ class WebReportTests(unittest.TestCase):
             self.assertIn('1 finding(s) excluded by baseline', output.read_text())
             self.assertIn('No detected findings', output.read_text())
 
-    def test_demo_comparison(self):
-        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
-            output = Path(d) / 'demo.html'
-            self.assertEqual(main(['demo', '--html', str(output)]), 0)
+    def test_failed_command_is_not_presented_as_clean(self):
+        with tempfile.TemporaryDirectory() as d:
+            output = Path(d) / 'report.html'
+            write_html(output, [], summary={'command_exit_code': 7, 'streams_scanned': 2})
             page = output.read_text()
-            self.assertIn('7 before', page)
-            self.assertIn('0 after', page)
-            self.assertIn('Rerun clean', page)
-            self.assertNotIn('demo.customer@example.test', page)
-            self.assertNotIn('4111111111111111', page)
+            self.assertIn('Command failed', page)
+            self.assertNotIn('No detected findings', page)
+            self.assertIn('Command exit code: 7', page)
 
 
 if __name__ == '__main__':

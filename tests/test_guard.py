@@ -48,7 +48,7 @@ class GuardTests(unittest.TestCase):
     def test_end_to_end(self):
         with tempfile.TemporaryDirectory() as d:
             source, logs = Path(d) / 'service.py', Path(d) / 'run.jsonl'
-            source.write_text(Path('examples/bank_service.py').read_text())
+            source.write_text(Path('tests/fixtures/bank_service.py').read_text())
             before_result = runpy.run_path(str(source))['run'](logs)
             before = log_scan(logs)
             self.assertEqual(len(before), 7)

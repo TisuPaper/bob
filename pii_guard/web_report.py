@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from .detectors import redact
+from .scanner import log_location
 
 
 LABELS = {"EMAIL": "Email address", "MY_IC": "Malaysian IC", "CARD": "Payment card",
@@ -18,9 +19,9 @@ def cards(findings):
     output = []
     for f in findings:
         kind = f['kind']
-        location = f"{f['source']}:{f['line']}" if f.get('source') else 'Source unknown'
+        location = f"{f['source']}:{f['line']}" if f.get('source') else (log_location(f) if f.get('log') else 'Unknown source')
         evidence = f.get('masked', 'No runtime evidence — review this logging call')
-        log = f"{f['log']}:{f['log_line']}" if f.get('log') else 'Code scan only'
+        log = log_location(f) if f.get('log') else 'Code scan only'
         output.append(f'''<article class="finding" data-kind="{safe(kind)}" data-origin="{safe(f['origin'])}">
           <div class="row"><span class="badge">{safe(LABELS.get(kind, kind))}</span><span class="muted">{safe(f['confidence'])}</span></div>
           <h3>{safe(location)}</h3><code>{safe(evidence)}</code>
@@ -30,25 +31,31 @@ def cards(findings):
     return '\n'.join(output)
 
 
-def write_html(path, findings, *, before=None, suppressed=0):
+def write_html(path, findings, *, suppressed=0, summary=None):
     runtime = sum(f['origin'] == 'runtime' for f in findings)
     risks = len(findings) - runtime
     sites = len({(f['source'], f['line']) for f in findings if f.get('source')})
-    shown = before if before is not None else findings
+    shown = findings
     counts = Counter(f['kind'] for f in shown)
     options = ''.join(f'<option value="{safe(k)}">{safe(LABELS.get(k, k))} ({v})</option>' for k, v in sorted(counts.items()))
     status = 'Review required' if findings else 'No detected findings'
-    comparison = ''
-    if before is not None:
-        comparison = f'''<section class="verification"><div><span class="eyebrow">FIX VERIFICATION</span>
-        <h2>{len(before)} before <span class="arrow">→</span> {len(findings)} after</h2>
-        <p>Fresh execution and logs after applying masking fixes. The findings below are the original scan.</p></div>
-        <span class="badge">{'Rerun has findings' if findings else 'Rerun clean'}</span></section>'''
-    empty = '<div class="empty">No findings in this scan. Only exercised logs and supported patterns were checked.</div>' if not shown else ''
-    after_section = f'<section><h2>After repair</h2>{cards(findings)}</section>' if before is not None and findings else ''
+    summary = summary or {}
+    failed_command = summary.get('command_exit_code', 0) != 0
+    if failed_command:
+        status = 'Command failed — review execution'
+    coverage = ''
+    if summary:
+        coverage = (f"<p class='muted'>Scanned {safe(summary.get('files_scanned', 0))} file(s), "
+                    f"{safe(summary.get('streams_scanned', 0))} stream(s), "
+                    f"{safe(summary.get('log_lines', 0))} log line(s). "
+                    f"Skipped {safe(summary.get('skipped_files', 0))} file(s).")
+        if 'command_exit_code' in summary:
+            coverage += f" Command exit code: {safe(summary['command_exit_code'])}."
+        coverage += '</p>'
+    empty = '<div class="empty">No pattern matches in the inspected inputs. Review scan coverage and any command failure above.</div>' if not shown else ''
     page = '''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PII Log Guard — Scan results</title>
+<title>logVeil — Scan results</title>
 <style>
 :root{color-scheme:light;--ink:#132c37;--muted:#5c707b;--teal:#086b60;--line:#dce5e7}
 *{box-sizing:border-box}body{margin:0;background:#f3f6f7;color:var(--ink);font:16px/1.6 system-ui,sans-serif}
@@ -66,19 +73,19 @@ summary{cursor:pointer;font-size:14px;color:var(--teal);font-weight:650;padding-
 @media(max-width:600px){.stats{gap:8px}.stat{padding:14px}.stat strong{font-size:28px}.verification{display:block}.verification .badge{margin-top:14px}input,select{width:100%}.controls label{width:100%}}
 </style></head><body>
 '''
-    page += f'''<header><div class="brand">PII LOG GUARD</div><h1>Know what reached your logs.</h1>
+    page += f'''<header><div class="brand">logVeil</div><h1>Know what reached your logs.</h1>
 <p>Review detected data types, masked evidence, and the logging statements that need attention.</p></header>
 <main><div class="row"><span class="badge">{status}</span><span class="muted">Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</span></div>
-<div class="stats"><div class="stat"><strong>{runtime}</strong><span>Observed PII matches{' after repair' if before is not None else ''}</span></div>
-<div class="stat"><strong>{risks}</strong><span>Static risks{' after repair' if before is not None else ''}</span></div>
-<div class="stat"><strong>{sites}</strong><span>Source locations with findings{' after repair' if before is not None else ''}</span></div></div>
-{comparison}<section id="results"><h2>{'Before repair' if before is not None else 'Scan findings'}</h2>
+<div class="stats"><div class="stat"><strong>{runtime}</strong><span>Observed PII matches</span></div>
+<div class="stat"><strong>{risks}</strong><span>Static risks</span></div>
+<div class="stat"><strong>{sites}</strong><span>Source locations with findings</span></div></div>
+{coverage}<section id="results"><h2>Scan findings</h2>
 <p class="muted">{suppressed} finding(s) excluded by baseline. Static risks are heuristics; runtime matches are observed patterns.</p>
 <div class="controls"><label>Search location or evidence<input id="search" type="search" placeholder="Search findings…"></label>
 <label>Data type<select id="kind"><option value="">All types</option>{options}</select></label>
 <label>Evidence<select id="origin"><option value="">All evidence</option><option value="runtime">Runtime logs</option><option value="static">Static code</option></select></label></div>
 <p id="count" class="muted" aria-live="polite">{len(shown)} findings shown</p>{cards(shown)}{empty}
-<p id="no-match" class="empty" hidden>No findings match these filters.</p></section>{after_section}
+<p id="no-match" class="empty" hidden>No findings match these filters.</p></section>
 <footer>Detected values are masked. No raw log payloads are embedded. Source locations come from code or log metadata.
 A clean scan covers only supported patterns and the logs supplied; it is not proof that all sensitive data is absent.</footer></main>'''
     page += '''<script>

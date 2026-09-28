@@ -68,7 +68,7 @@ class CustomRuleTests(unittest.TestCase):
                         load_rules(config)
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
-                self.assertEqual(main(['scan', 'examples', '--rules', str(config)]), 2)
+                self.assertEqual(main(['scan', 'tests/fixtures', '--rules', str(config)]), 2)
             self.assertNotIn('"pattern"', stderr.getvalue())
 
     def test_priority_and_short_values(self):

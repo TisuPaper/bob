@@ -3,13 +3,15 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pii-log-guard"
-version = "0.1.0"
-description = "Detect, trace, and repair PII in Python logs"
+name = "logveil"
+version = "0.2.0"
+description = "Local sensitive-data scanner for logs, command output, and Python logging calls"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
+logveil = "pii_guard.cli:main"
 pii-guard = "pii_guard.cli:main"
 
 [tool.setuptools.packages.find]

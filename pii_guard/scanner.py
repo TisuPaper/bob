@@ -1,4 +1,6 @@
 import ast
+import gzip
+import re
 import hashlib
 import json
 from pathlib import Path
@@ -50,31 +52,84 @@ def log_text(value, key=""):
     return f"{key}={value}"
 
 
-def log_scan(path):
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+MAX_LINE_BYTES = 1024 * 1024
+
+
+def scan_line(raw, path, line_number):
+    source, source_line = None, None
+    message = ANSI.sub("", raw.rstrip("\r\n"))
+    if "\x00" in message:
+        raise ValueError("Binary input is not supported")
+    try:
+        record = json.loads(message)
+        message = log_text(record)
+        if isinstance(record, dict):
+            source = record.get("source", record.get("pathname"))
+            source_line = record.get("line", record.get("lineno"))
+            if not isinstance(source, str) or type(source_line) is not int or source_line < 1:
+                source, source_line = None, None
+    except json.JSONDecodeError:
+        pass
     findings = []
-    with Path(path).open(encoding="utf-8") as stream:
-        for line_number, raw in enumerate(stream, 1):
-            source, source_line, message = None, None, raw.rstrip("\n")
-            try:
-                record = json.loads(raw)
-                if isinstance(record, dict):
-                    # Scan the entire record, including structured extras.
-                    message = log_text(record)
-                    if isinstance(record.get("source"), str) and type(record.get("line")) is int and record["line"] > 0:
-                        source, source_line = record["source"], record["line"]
-            except json.JSONDecodeError:
-                pass
-            for match in detect(message):
-                findings.append({"origin": "runtime", "log": str(path), "log_line": line_number,
-                                 "source": source, "line": source_line, "kind": match.kind,
-                                 "masked": match.masked, "confidence": "observed-pattern",
-                                 "path": "logging call → captured log" if source else "captured log → source unknown",
-                                 "suggestion": "Mask at the logging call; rerun tests and scan fresh logs."})
+    for match in detect(message):
+        findings.append({"origin": "runtime", "log": str(path), "log_line": line_number,
+                         "source": source, "line": source_line, "kind": match.kind,
+                         "masked": match.masked, "confidence": "observed-pattern",
+                         "path": "logging call → captured log" if source else "captured log → source unknown",
+                         "suggestion": "Mask at the logging call; rerun tests and scan fresh logs."})
     return findings
+
+
+def scan_stream(stream, label, stats=None):
+    findings, line_number = [], 0
+    while True:
+        raw = stream.readline(MAX_LINE_BYTES + 1)
+        if not raw:
+            break
+        if len(raw.encode("utf-8")) > MAX_LINE_BYTES:
+            raise ValueError("Input line exceeds the 1 MiB limit; scan incomplete")
+        line_number += 1
+        findings.extend(scan_line(raw, label, line_number))
+    if stats is not None:
+        stats['log_lines'] = stats.get('log_lines', 0) + line_number
+    return findings
+
+
+MAX_JSON_BYTES = 16 * 1024 * 1024
+
+
+def log_scan(path, stats=None):
+    compressed = str(path).lower().endswith('.gz')
+    opener = gzip.open if compressed else open
+    with opener(path, 'rt', encoding='utf-8-sig') as stream:
+        name = str(path)[:-3] if compressed else str(path)
+        if name.lower().endswith('.json'):
+            raw = stream.read(MAX_JSON_BYTES + 1)
+            if len(raw.encode('utf-8')) > MAX_JSON_BYTES:
+                raise ValueError('JSON document exceeds 16 MiB; export JSONL for larger inputs')
+            data = json.loads(raw)
+            findings = []
+            records = data if isinstance(data, list) else [data]
+            for index, record in enumerate(records):
+                matches = scan_line(json.dumps(record, ensure_ascii=False), path, None)
+                for finding in matches:
+                    finding['json_pointer'] = f'/{index}' if isinstance(data, list) else ''
+                findings.extend(matches)
+            if stats is not None:
+                stats['log_lines'] = stats.get('log_lines', 0) + len(raw.splitlines())
+            return findings
+        return scan_stream(stream, str(path), stats)
+
+
+def log_location(finding):
+    if 'json_pointer' in finding:
+        return f"{finding['log']} (JSON pointer {finding['json_pointer'] or '/'})"
+    return f"{finding['log']}:{finding['log_line']}"
 
 
 def fingerprint(finding):
     # No PII or PII-derived hashes in baselines. Locations are intentionally line-sensitive.
     key = [finding["origin"], finding.get("source") or finding.get("log"),
-           finding.get("line") or finding.get("log_line"), finding["kind"]]
+           finding.get("line") or finding.get("log_line") or finding.get("json_pointer"), finding["kind"]]
     return hashlib.sha256(json.dumps(key).encode()).hexdigest()[:24]

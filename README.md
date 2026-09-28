@@ -1,99 +1,114 @@
 # logVeil
 
-logVeil helps developers detect sensitive data in code and logs, review masked findings, apply masking fixes, and verify the results through a local web interface.
+A local sensitive-data scanner for **logs from any language, command output, and Python logging calls**. Review masked findings in your terminal or browser, define your own patterns, and use exit codes to gate CI jobs.
 
 ## Background
 
-Financial-industry developers handle confidential customer information, including identity numbers, account details and payment card numbers. That data needs protection in application logs as well as databases.
+Financial applications handle confidential customer information that can accidentally reach logs through debugging statements, whole objects or exception messages. Developers need a convenient way to check real application output during daily development. logVeil runs locally, without an API key, cloud service or production database connection.
 
-A debugging statement that logs a customer object or exception can accidentally expose sensitive information. Developers need a simple, convenient tool that fits their daily workflow. logVeil brings detection, source locations, masking fixes and verification into one local tool.
+## Get the local command
 
-## Quick start
-
-**Requirements:** Python 3.10+, no external dependencies or API key. Run these commands from this repository:
+Requires **Python 3.10+**. Build a standalone command from this repository without pip or downloads:
 
 ```sh
-# Run the demo and generate a before/after report
-python3 -m pii_guard demo --html scan-results.html
+python3 scripts/build_standalone.py
+./dist/logveil --help
 
-# Start the local report and rules editor
-python3 -m pii_guard serve scan-results.html --rules rules/custom.json
+# Add this build to PATH for the current terminal
+export PATH="$PWD/dist:$PATH"
+```
+
+You can now change to any project directory and run `logveil`. The archive contains the scanner, report generator and rules editor; it needs only Python on the host. Rebuild after changing source code. On Windows, invoke the archive as `python path/to/dist/logveil`.
+
+Alternatively, install the Python package (also needed in applications using automatic Python repairs):
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install .
+logveil --help
+```
+
+Keep this environment active when changing directories. Installation uses setuptools; the scanner itself has no third-party runtime dependencies. From the source checkout, `python3 -m pii_guard` works too. `pii-guard` remains an installed compatibility alias.
+
+## Scan your logs
+
+```sh
+# Recursively scan a log directory
+logveil scan ./logs --html scan-results.html
+
+# Scan specific files, including compressed logs
+logveil scan application.log audit.jsonl archived.log.gz --json
+
+# Scan Python source and captured logs together
+logveil scan ./src --logs ./logs --html scan-results.html
+
+# Read logs from stdin
+cat application.log | logveil scan -
+```
+
+No example service or mock data is needed. Point the scanner at the files your application actually produces.
+
+Directories discover `.py`, `.log`, rotated `.log.1`, `.jsonl`, `.ndjson`, `.json`, `.txt`, `.out`, `.err`, and compressed log equivalents ending in `.gz`. Explicit file paths can have any extension. Use `--mode logs` to scan only discovered log/text files, or `--mode python` for Python source analysis. `.json` files are parsed as JSON documents; use `.jsonl`/`.ndjson` for one record per line.
+
+## Check an application or test run
+
+```sh
+logveil run --html scan-results.html -- python app.py
+logveil run --html scan-results.html -- npm test
+logveil run --timeout 600 --json -- go test ./...
+```
+
+logVeil executes the command and scans **stdout and stderr**, without echoing or saving raw output. Put scanner options before `--`. Findings refer to the relevant output stream unless the application supplies source metadata. Files written directly by the application require a separate `scan`.
+
+This mode is for noninteractive commands; stdin is closed and no terminal is allocated. The default timeout is 300 seconds. Shell syntax is not interpreted—use an explicit shell command only when you intend to execute one. The child command runs with your normal permissions and can have its normal side effects.
+
+## Save project settings
+
+Inside the project you want to scan:
+
+```sh
+logveil init
+```
+
+This creates `logveil.json` and `logveil-rules.json` without overwriting existing files. Edit the paths for your project:
+
+```json
+{
+  "version": 1,
+  "paths": ["src", "logs"],
+  "mode": "auto",
+  "exclude": ["tests/*", "*.debug.log"],
+  "rules": "logveil-rules.json",
+  "html": ".logveil/report.html"
+}
+```
+
+Then use:
+
+```sh
+logveil scan
+logveil serve
+```
+
+Settings load from `logveil.json` in the current directory, or from `--config /path/to/logveil.json`. Configured paths resolve beside that file. Explicit input paths replace configured inputs; `--exclude` adds to configured exclusions. The initial configuration scans `.` and excludes `tests/*`.
+
+## Review results in the browser
+
+With project settings, `logveil serve` hosts the configured report. Without settings, specify a generated file:
+
+```sh
+logveil serve scan-results.html --rules /path/to/custom-rules.json
 ```
 
 - **Results:** [http://localhost:8000/](http://localhost:8000/)
-- **Custom rules:** [http://localhost:8000/rules](http://localhost:8000/rules)
+- **Rules editor:** [http://localhost:8000/rules](http://localhost:8000/rules)
 
-The CLI prints clickable links. Keep the server running while using the pages; press **Ctrl+C** to stop. If port 8000 is occupied, add `--port 8080` and use that port in the URLs.
+The CLI prints clickable links. Use `--port 8080` if needed; press Ctrl+C to stop. The server binds only to loopback. It displays reports and edits the selected existing rules file; it does not execute scans. Run the scan again and refresh to update results. Reports also open directly as offline HTML files.
 
-The demo runs a synthetic banking service with direct-field, whole-object and exception-message leaks. It fixes a temporary copy and verifies a fresh run:
+## Add patterns and apply fixes
 
-```text
-Leaking statements: 3 → 0
-Detected PII values: 7 → 0
-Service results unchanged: True
-```
-
-The original example remains unchanged. The report preserves masked findings, but the demo's temporary files are removed after execution.
-
-## Technical architecture
-
-```mermaid
-flowchart TD
-    CLI["CLI<br/>cli.py"] --> Scanner["Code and log scanner<br/>scanner.py"]
-    CLI --> Repair["Code fixes and safe logging<br/>fixer.py · runtime.py"]
-    Scanner --> Engine["Detection and masking engine<br/>detectors.py"]
-    Repair --> Engine
-    Scanner --> Web["HTML reports and local server<br/>web_report.py · server.py"]
-    Web --> Editor["Browser rules editor<br/>rules_editor.py"]
-    Editor --> Rules["Custom configuration<br/>rules/custom.json"]
-    Rules --> Engine
-```
-
-The **scanner** checks Python logging calls and captured logs. The **detection engine** supplies shared pattern matching and masking. The **repair components** wrap supported logging calls so sensitive matches are masked before emission. The **web components** display results and let developers update custom rules.
-
-Everything runs locally using Python's standard library. The product is named **logVeil**; its Python module remains `pii_guard`. IBM Bob can run and review this workflow through its terminal; no Bob API is required.
-
-## Scan your project
-
-Replace the paths below with your Python project and captured test-run logs:
-
-```sh
-python3 -m pii_guard scan path/to/project --logs test-run.jsonl --html scan-results.html
-```
-
-Use a source path for code scanning, `--logs` for runtime scanning, or both. Add `--json` for machine-readable output. The webpage shows data types, masked evidence, source locations, suggested fixes, and search/filter controls.
-
-The server displays the generated report; it does not run scans. Generate the HTML again and refresh the page to update results. You can also open the HTML file directly without a server.
-
-## Review, fix and verify
-
-```sh
-# Preview masking changes
-python3 -m pii_guard fix path/to/service.py
-
-# Apply the changes
-python3 -m pii_guard fix path/to/service.py --apply
-
-# Rerun your application/tests, then scan the fresh logs
-python3 -m pii_guard scan path/to/service.py --logs fresh-test-run.jsonl --html scan-results.html
-```
-
-Repairs use `pii_guard.runtime.safe_log`, so keep this package importable in the application environment. Fixes modify supported logging calls; preview the diff before applying. Existing logs are not rewritten.
-
-## Add custom detection rules
-
-Built-in detectors cover **emails, Malaysian IC numbers, Luhn-valid card candidates, and contextual account numbers**. Add other formats without changing Python code:
-
-1. Open the **Custom rules** page.
-2. Add a pattern, or edit/remove entries in the JSON draft.
-3. Click **Validate draft**, then **Save rules**.
-4. Rerun the scan with the saved configuration:
-
-```sh
-python3 -m pii_guard scan path/to/project --logs test-run.jsonl --rules rules/custom.json --html scan-results.html
-```
-
-You can also edit [rules/custom.json](rules/custom.json) directly. For example:
+Built-in rules detect **emails, Malaysian IC formats, Luhn-valid card candidates and contextual account numbers**. Add your own rule in the browser or edit the rules file:
 
 ```json
 {
@@ -104,31 +119,63 @@ You can also edit [rules/custom.json](rules/custom.json) directly. For example:
 }
 ```
 
-This masks `EMP-123456` as `[EMPLOYEE_ID REDACTED]`. New types automatically appear in report filters. Built-in rules stay enabled.
+After saving, scan with `--rules custom-rules.json` or the configured project rules. The matched value is shown as `[EMPLOYEE_ID REDACTED]`.
 
-**For repaired applications to use custom masking**, set the same configuration before launching the application or tests:
+Python-only repair support is still available:
 
 ```sh
-export PII_GUARD_RULES="$PWD/rules/custom.json"
+logveil fix path/to/service.py
+logveil fix path/to/service.py --apply
 ```
 
-`--rules` applies only to that CLI invocation; repairs do not embed the rules. Restart applications after changing their cached rule configuration. See the [rule field reference](docs/reference.md#add-your-own-detection-patterns) for capture groups, masking options and priorities.
+Review the preview before applying. Repaired code imports `pii_guard.runtime`, so install logVeil in that application's Python environment. To use custom rules at runtime, set:
 
-## What the results mean
+```sh
+export LOGVEIL_RULES="/absolute/path/to/custom-rules.json"
+```
 
-- **Static risks** are heuristic warnings about logging calls; they need review.
-- **Runtime findings** are patterns observed in the supplied logs.
-- **Source tracing** uses structured log metadata. Plain logs without it show an unknown source. See [logging setup](docs/reference.md#trace-actual-test-run-logs).
-- **A clean rerun** means no configured patterns matched the exercised logs; it does not prove that all sensitive data is absent.
+The application must restart after changing cached rules. CLI project settings do not automatically configure a separate application. `PII_GUARD_RULES` remains supported for compatibility.
 
-Supported code analysis is limited to standard severity calls on `logger`, `logging` and `log`. Custom logging APIs, arbitrary data flows and structured `extra` field masking need additional handling. See [detection scope](docs/reference.md#detection-scope).
+## Technical architecture
 
-## CI and tests
+```mermaid
+flowchart TD
+    CLI["logveil CLI + project settings"] --> Inputs["File discovery / stdin / command capture"]
+    Inputs --> Scanner["Log scanner + Python AST scanner"]
+    Scanner --> Rules["Detection engine + custom JSON rules"]
+    Scanner --> Report["Masked terminal / JSON / HTML report"]
+    Report --> Web["Local server + browser rules editor"]
+    Web --> Rules
+    CLI --> Fix["Python fixes + safe logging wrapper"]
+    Fix --> Rules
+```
 
-Scan exit codes are **0** for no new findings, **1** for findings, and **2** for invalid input. Optional baselines let CI report only new locations/types; see the [CI guide](docs/reference.md#ci-block-newly-observed-findings).
+## CI exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Scan completed with no unbaselined findings; wrapped command succeeded |
+| `1` | Scan completed with findings |
+| `2` | Invalid input, unreadable files, timeout or incomplete scan |
+| `3` | Wrapped command failed; its original exit code is included in the report |
+| `130` | Interrupted |
+
+A failed wrapped command takes precedence over findings. Optional baselines suppress known location/type fingerprints; see the [CI reference](docs/reference.md#ci-baselines).
+
+## Coverage and limits
+
+“Universal” here means **language-independent log and process-output scanning**. Source-code analysis and automatic fixes currently support selected Python logging calls. Other languages need their own source-analysis integrations.
+
+Reports state how many files, streams and log lines were scanned. Empty file selection, invalid UTF-8, binary inputs and input limits fail rather than producing a successful scan. A supplied empty log file or silent successful command may legitimately contain no matches.
+
+Source locations require supported structured metadata. Static findings are heuristic risks; runtime findings are observed patterns. A clean result does not prove that every sensitive value or execution path is covered. Custom regexes are trusted configuration and have no matching timeout. Original input files are not redacted or changed by a scan.
+
+For supported formats, exclusions, source tracing, configuration precedence and rule fields, see the [technical reference](docs/reference.md).
+
+## Tests
 
 ```sh
 python3 -m unittest discover -s tests -v
 ```
 
-The [technical reference](docs/reference.md) contains the full manual demo, logging setup, rule configuration, CI workflow and implementation limits.
+The banking example exists only under `tests/fixtures` for regression testing. The application has no mock demo command.

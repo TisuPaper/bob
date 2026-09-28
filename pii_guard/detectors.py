@@ -99,7 +99,7 @@ def get_rules():
     active = ACTIVE_RULES.get()
     if active is not None:
         return active
-    path = os.environ.get("PII_GUARD_RULES")
+    path = os.environ.get("LOGVEIL_RULES") or os.environ.get("PII_GUARD_RULES")
     return _environment_rules(str(Path(path).resolve())) if path else BUILTIN_RULES
 
 
