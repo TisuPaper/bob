@@ -16,3 +16,6 @@ pii-guard = "pii_guard.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["pii_guard*"]
+
+[tool.setuptools.package-data]
+pii_guard = ["assets/*.html", "assets/*.css", "assets/*.js"]

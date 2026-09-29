@@ -11,6 +11,7 @@ from .runner import scan_command
 from .scanner import fingerprint, log_location, log_scan, scan_stream, static_scan
 from .web_report import write_html
 from .server import serve
+from .workspace import result_path, save_result
 
 
 def safe_data(value):
@@ -58,6 +59,7 @@ def emit(findings, args, settings, summary):
     if html:
         Path(html).parent.mkdir(parents=True, exist_ok=True)
         write_html(html, visible, suppressed=summary['suppressed'], summary=summary)
+        save_result(html, visible, summary)
     report(visible, args.json, summary)
     if html:
         print(f'Open report: {Path(html).resolve().as_uri()}', file=sys.stderr if args.json else sys.stdout)
@@ -84,6 +86,8 @@ def main(argv=None):
     serve_parser = commands.add_parser('serve', help='Host a report and custom-rules editor on localhost')
     serve_parser.add_argument('report', nargs='?')
     serve_parser.add_argument('--port', type=int, default=8000)
+    serve_parser.add_argument('--root', help='Workspace root allowed for browser scans (default config directory or cwd)')
+    serve_parser.add_argument('--status', help='Guard status file (default ROOT/.logveil/guard-status.json)')
     for command in (scan, run, repair, serve_parser):
         command.add_argument('--config', help='Project JSON settings (default ./logveil.json if present)')
         command.add_argument('--rules', help='Custom rules JSON; overrides environment and project settings')
@@ -103,7 +107,8 @@ def main(argv=None):
         rule_path = args.rules or os.environ.get('LOGVEIL_RULES') or os.environ.get('PII_GUARD_RULES') or settings.get('rules')
         if args.command == 'serve':
             html = args.report or settings.get('html') or 'scan-results.html'
-            return serve(html, args.port, rule_path or 'logveil-rules.json')
+            root = args.root or (str(Path(settings['_file']).parent) if settings.get('_file') else str(Path.cwd()))
+            return serve(html, args.port, rule_path or str(Path(root) / 'logveil-rules.json'), root, args.status)
         token = ACTIVE_RULES.set(load_rules(rule_path) if rule_path else get_rules())
         if args.command == 'fix':
             changes = fix(args.source, args.apply)
@@ -126,7 +131,8 @@ def main(argv=None):
             stdin_count = sum(path == '-' for path, _ in requests)
             if stdin_count > 1 or (stdin_count and mode == 'python'):
                 raise ValueError('stdin (-) is supported once, in auto/logs mode')
-            ignored = [args.html or settings.get('html'), rule_path, settings.get('_file'), args.baseline, args.write_baseline]
+            html = args.html or settings.get('html')
+            ignored = [html, result_path(html) if html else None, rule_path, settings.get('_file'), args.baseline, args.write_baseline]
             files, skipped = discover([(p, m) for p, m in requests if p != '-'],
                                       settings.get('exclude', []) + args.exclude, ignored) if len(requests) > stdin_count else ([], 0)
             summary = {'files_scanned': len(files), 'streams_scanned': stdin_count, 'log_lines': 0, 'skipped_files': skipped}

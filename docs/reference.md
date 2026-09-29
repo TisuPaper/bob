@@ -31,7 +31,7 @@ These limits fail with exit code 2. On incomplete scans no new report is written
 
 The CLI reads `logveil.json` only in the current working directory, not parent directories. `--config PATH` explicitly selects another file. Relative paths inside it resolve against the config directory. Command-line paths resolve against the working directory. `--logs` without positional inputs replaces configured input paths too.
 
-Rule precedence: **`--rules` → `LOGVEIL_RULES` → `PII_GUARD_RULES` → project rules → built-ins**. `serve --rules` selects the file the browser may edit; it does not change prior report results. When no rule path is configured, the server expects an existing `logveil-rules.json`. Run `logveil init` to create one if you need the editor.
+Rule precedence: **`--rules` → `LOGVEIL_RULES` → `PII_GUARD_RULES` → project rules → built-ins**. `serve --rules` selects the file the browser may edit; it does not change prior report results. When no rule path is configured, the workspace creates an empty `logveil-rules.json` if needed.
 
 ## Source tracing
 
@@ -97,7 +97,25 @@ Edit the selected JSON file directly or use `/rules` on the local server. The ed
 
 Built-in account rules have priority 200; other built-ins have 100. Built-ins register first; equal priorities preserve registration order. Lower-priority overlapping matches are skipped. Use contextual patterns that do not match redaction markers. Unknown fields, duplicate kinds, invalid regexes/groups and unsupported validators are rejected.
 
-`rules/custom.json` in the source repository is an optional set of sample rules; installation does not depend on that file. Runtime rules loaded through environment variables are cached per process. Restart applications after changes.
+`rules/custom.json` in the source repository is an optional set of sample rules; installation does not depend on that file. The `safe_log` helper caches environment rules per process. The handler guard reloads a changed rule file at the next event.
+
+## Pre-emission guard
+
+`pii_guard.guard.install_guard(rules_path, status_path=..., mode="mask")` wraps the formatters on existing standard text handlers, including root/named loggers and the last-resort handler. Pass `logger=...` to protect only its direct handlers. Logging configuration must be complete before installation. Non-emitting NullHandlers are ignored. A handler added later needs `protect_handler(handler, policy)`.
+
+The guard clones the LogRecord, renders interpolation, sanitizes fields and exception/stack text, invokes the original formatter, and masks any remaining matches in its final text. The original record is not modified. This covers built-in StreamHandler/FileHandler emission behavior; custom subclasses that bypass format() are outside the contract. QueueHandler, SocketHandler, HTTPHandler and other non-text handlers are rejected at installation. Formatters must not perform their own logging/output side effects.
+
+In `mask` mode only detected spans are replaced. In `block` mode the full formatted message is replaced by a fixed marker when a pattern matches. Formatting failures and unreadable/invalid updated rules emit a protection-error marker rather than the original message. Rule regex execution has no timeout; trusted, tested rules are still required. Rules can miss sensitive formats, so no complete confidentiality guarantee is implied.
+
+The rule file is checked at every handler emission using its modification time, size and inode. Writes from the editor are atomic. Failed updates do not silently use a stale policy: affected emissions are withheld until a valid file is restored. Keep the server editor and the application pointed at the same rules file.
+
+`status_path` is optional. It records process ID, timestamps, mode, handler count, inspected emissions, protected emissions and protection errors. One process should own a given status file. Each handler is an emission: one log event going to two handlers counts twice. The UI distinguishes recent events from stale observations and does not infer whether an application is currently running. Status write errors do not allow raw logs through. The status file is updated per event; leave it disabled if that disk overhead is undesirable.
+
+## Workspace API and scope
+
+The loopback server provides a three-page UI: scans, protection and rules. Mutating requests require a random session token, matching Host and same-origin browser requests. Browser scans accept only paths resolving inside `--root`; no shell commands or code repairs can be triggered from the frontend. One browser scan runs at a time, with progress/status polled by the page. Pattern matching still executes trusted regexes in the server process.
+
+The CLI writes a masked report companion alongside HTML. The workspace reads it to load current findings and preserve results across restarts. Browser scans use saved rules and explicit scan inputs; project CLI exclusions and baselines are not currently applied by browser scans. Use the CLI when those policies are required. Failed scans retain previous results and display a failure state.
 
 ## Python scanning and repairs
 

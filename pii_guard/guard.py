@@ -112,6 +112,7 @@ class GuardFormatter(logging.Formatter):
                 sanitized = copy.copy(record)
                 sanitized.msg = clean(record.getMessage())
                 sanitized.args = ()
+                sanitized.message = sanitized.msg
                 for key, value in record.__dict__.items():
                     if key not in {'msg', 'args', 'exc_info', 'exc_text', 'stack_info', 'message'}:
                         setattr(sanitized, key, clean(value, key))
@@ -160,11 +161,13 @@ def install_guard(rules_path=None, *, status_path=None, mode='mask', logger=None
         for item in logging.Logger.manager.loggerDict.values():
             if isinstance(item, logging.Logger):
                 handlers.extend(item.handlers)
-        if logging.lastResort:
-            handlers.append(logging.lastResort)
-    handlers = list(dict.fromkeys(handlers))
+    # Libraries commonly install NullHandler; it never emits and needs no guard.
+    handlers = [handler for handler in handlers if not isinstance(handler, logging.NullHandler)]
     if not handlers:
         raise ValueError('Configure logging handlers before installing the guard')
+    if logger is None and logging.lastResort:
+        handlers.append(logging.lastResort)
+    handlers = list(dict.fromkeys(handlers))
     if any(not isinstance(handler, logging.StreamHandler) for handler in handlers):
         raise ValueError('Guard requires text handlers; protect queue/network integrations separately')
     policy = GuardPolicy(rules_path, status_path, mode)

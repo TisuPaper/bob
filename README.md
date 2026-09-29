@@ -1,10 +1,26 @@
 # logVeil
 
-A local sensitive-data scanner for **logs from any language, command output, and Python logging calls**. Review masked findings in your terminal or browser, define your own patterns, and use exit codes to gate CI jobs.
+A local privacy workspace to **prevent matched data from reaching protected Python log outputs**, scan logs from any language, and manage detection rules. Use the browser for daily work or the CLI for automation.
 
 ## Background
 
 Financial applications handle confidential customer information that can accidentally reach logs through debugging statements, whole objects or exception messages. Developers need a convenient way to check real application output during daily development. logVeil runs locally, without an API key, cloud service or production database connection.
+
+## Technical architecture
+
+```mermaid
+flowchart TD
+    App["Python application"] --> Guard["Pre-emission guard<br/>guard.py"]
+    Guard --> Output["Protected console / file logs"]
+    Inputs["Code, logs & command output"] --> Scanner["Scanner<br/>scanner.py · runner.py"]
+    Rules["Detection engine + saved rules<br/>detectors.py · JSON configuration"] --> Guard
+    Rules --> Scanner
+    Scanner -->|masked findings| UI["Local web workspace<br/>server.py · workspace.py · assets/"]
+    Guard -->|aggregate status| UI
+    UI -->|save rules| Rules
+```
+
+The **guard** masks or blocks matches before supported Python text handlers write them. The **scanner** inspects code and existing output. Both use the same detection engine and rules. The **web workspace** runs local scans, displays findings and guard status, and edits rules; it does not need a cloud service.
 
 ## Get the local command
 
@@ -30,6 +46,81 @@ logveil --help
 ```
 
 Keep this environment active when changing directories. Installation uses setuptools; the scanner itself has no third-party runtime dependencies. From the source checkout, `python3 -m pii_guard` works too. `pii-guard` remains an installed compatibility alias.
+
+## Start the local UI
+
+From this repository, run:
+
+```sh
+python3 -m pii_guard serve scan-results.html --rules rules/custom.json --port 8003
+```
+
+Open **[http://localhost:8003/](http://localhost:8003/)**. Keep the terminal running while you use the UI; press **Ctrl+C** to stop. A previous scan is not required. If the port is occupied, choose another with `--port` and open the matching URL.
+
+To work on another project with the installed or standalone command:
+
+```sh
+logveil serve --root /path/to/your/project --port 8003
+```
+
+Browser scans stay inside the selected workspace root. Use `--rules PATH` to choose a rule file; otherwise an empty `logveil-rules.json` is created in that workspace. The server listens only on your local machine.
+
+## How to use the UI
+
+### 1. Scan and review findings
+
+1. Open **Scan results** in the sidebar.
+2. Enter a file or directory relative to the displayed workspace, such as `logs/` or `src/`.
+3. Choose **Code & logs**, **Logs only**, or **Python code**, then click **Run scan**.
+4. Review the observed matches, code risks and files scanned. Search by file or data type, or use the type filter.
+5. Click a finding to see its masked evidence, location, trace and suggested next step.
+6. Click **Export report** to download the HTML report.
+
+Results update when the scan finishes. If a scan fails, the UI shows the failure and retains the previous completed results. A log finding is an observed pattern; a code risk needs review. No matches means only that the inspected inputs did not match the configured patterns.
+
+### 2. Manage and test rules
+
+1. Open **Detection rules** and click **Add rule**.
+2. Enter a name such as `EMPLOYEE_ID` and a pattern such as `EMP-[0-9]{6}`. Leave **Keep last characters** at **None** for full masking.
+3. Click **Add to draft**. Use **Edit** or **Remove** to change draft rules.
+4. Under **Try a sample**, enter synthetic text such as `employee=EMP-123456` and click **Test masking**.
+5. Check the masked preview, then click **Save changes** to activate the draft.
+
+Built-in rules remain enabled. Connected guards reload saved rules on their next log event. Rerun scans to check existing files with the updated rules. Advanced fields are available in the collapsed JSON editor.
+
+### 3. Connect pre-emission protection
+
+1. Open **Protection** and click **Copy setup**.
+2. Add the snippet to your Python application **after configuring its logging handlers**. Install the logVeil Python package in that application's environment first.
+3. Run your application and generate a log event.
+4. Return to **Protection** to see reported handler emissions, masked/blocked emissions and protection errors.
+
+The snippet uses the same rules file as the editor and a local status file. Status refreshes automatically; **Not connected** means no readable status has been received, while **Last known status** indicates older observations. Opening the UI alone does not install the guard in an application. See the integration below for supported outputs.
+
+## Mask before logs are written
+
+Install logVeil in your application's Python environment, configure its logging handlers, then install the guard once:
+
+```python
+import logging
+from pii_guard.guard import install_guard
+
+logging.basicConfig(level=logging.INFO)
+policy = install_guard(
+    rules_path="/path/to/your/project/logveil-rules.json",
+    status_path="/path/to/your/project/.logveil/guard-status.json",
+    mode="mask",  # or "block" to replace the entire matched message
+)
+
+# Existing logging calls stay unchanged.
+logging.info("Customer email: %s", customer.email)
+```
+
+The **Protection** page supplies this snippet with your actual file paths. The optional status file contains aggregate counts, never log payloads. The page reports last observed activity; it does not claim all application outputs are protected.
+
+The guard formats and masks messages, exceptions and structured fields before supported text handlers write them. Saved rules reload on the next log event. If rules become invalid or formatting/masking fails, the original message is withheld and a fixed protection-error marker is written instead.
+
+**Scope:** existing Python `StreamHandler`/`FileHandler` text outputs, including standard rotating files. Install after logging configuration. For a handler added later, call `protect_handler(handler, policy)`; replacing its formatter removes protection. Queue, network and custom emitters require their own integrations. Direct `print`, direct file writes and other languages are not intercepted.
 
 ## Scan your logs
 
@@ -93,18 +184,17 @@ logveil serve
 
 Settings load from `logveil.json` in the current directory, or from `--config /path/to/logveil.json`. Configured paths resolve beside that file. Explicit input paths replace configured inputs; `--exclude` adds to configured exclusions. The initial configuration scans `.` and excludes `tests/*`.
 
-## Review results in the browser
+## Reports and live updates
 
-With project settings, `logveil serve` hosts the configured report. Without settings, specify a generated file:
+`logveil scan --html PATH` writes an offline HTML report and a masked JSON companion (`PATH.json`). The workspace loads this companion to display results, so later CLI scans appear without restarting the server. Browser scans also refresh the report and companion. Keep both files together.
+
+For a specific report and existing rule file:
 
 ```sh
-logveil serve scan-results.html --rules /path/to/custom-rules.json
+logveil serve scan-results.html --root /path/to/project --rules /path/to/custom-rules.json
 ```
 
-- **Results:** [http://localhost:8000/](http://localhost:8000/)
-- **Rules editor:** [http://localhost:8000/rules](http://localhost:8000/rules)
-
-The CLI prints clickable links. Use `--port 8080` if needed; press Ctrl+C to stop. The server binds only to loopback. It displays reports and edits the selected existing rules file; it does not execute scans. Run the scan again and refresh to update results. Reports also open directly as offline HTML files.
+Reports generated by older versions can still be exported, but rerun the scan to populate the workspace findings. Use **Export report** for a portable HTML file.
 
 ## Add patterns and apply fixes
 
@@ -134,21 +224,7 @@ Review the preview before applying. Repaired code imports `pii_guard.runtime`, s
 export LOGVEIL_RULES="/absolute/path/to/custom-rules.json"
 ```
 
-The application must restart after changing cached rules. CLI project settings do not automatically configure a separate application. `PII_GUARD_RULES` remains supported for compatibility.
-
-## Technical architecture
-
-```mermaid
-flowchart TD
-    CLI["logveil CLI + project settings"] --> Inputs["File discovery / stdin / command capture"]
-    Inputs --> Scanner["Log scanner + Python AST scanner"]
-    Scanner --> Rules["Detection engine + custom JSON rules"]
-    Scanner --> Report["Masked terminal / JSON / HTML report"]
-    Report --> Web["Local server + browser rules editor"]
-    Web --> Rules
-    CLI --> Fix["Python fixes + safe logging wrapper"]
-    Fix --> Rules
-```
+The older `safe_log` repair helper caches environment rules and needs an application restart after rule changes. The recommended handler guard reloads rules automatically. CLI project settings do not automatically configure a separate application. `PII_GUARD_RULES` remains supported for compatibility.
 
 ## CI exit codes
 

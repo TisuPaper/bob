@@ -69,7 +69,7 @@ class GuardBoundaryTests(unittest.TestCase):
         self.assertIn(WITHHELD, self.stream.getvalue())
 
     def test_unsupported_handlers_rejected_and_later_handler_explicit(self):
-        self.logger.addHandler(logging.NullHandler())
+        self.logger.addHandler(logging.Handler())
         with self.assertRaises(ValueError):
             install_guard(logger=self.logger)
         self.assertIsNone(self.handler.formatter)
@@ -78,6 +78,15 @@ class GuardBoundaryTests(unittest.TestCase):
         second = logging.StreamHandler(io.StringIO())
         protect_handler(second, policy)
         self.assertEqual(policy.handlers, 2)
+
+    def test_null_handlers_do_not_prevent_installation(self):
+        self.logger.addHandler(logging.NullHandler())
+        policy = install_guard(logger=self.logger)
+        self.assertEqual(policy.handlers, 1)
+        empty = logging.Logger('empty')
+        empty.addHandler(logging.NullHandler())
+        with self.assertRaises(ValueError):
+            install_guard(logger=empty)
 
 
 if __name__ == '__main__':
