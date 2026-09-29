@@ -6,6 +6,7 @@ from pathlib import Path
 from .config import init_project, load_config
 from .detectors import ACTIVE_RULES, get_rules, load_rules, redact
 from .fixer import fix
+from .docker_logs import scan_docker
 from .inputs import discover
 from .runner import scan_command
 from .scanner import fingerprint, log_location, log_scan, scan_stream, static_scan
@@ -80,18 +81,25 @@ def main(argv=None):
     run = commands.add_parser('run', help='Execute a command and inspect stdout/stderr (no shell)')
     run.add_argument('--timeout', type=float, default=300, help='Maximum command duration in seconds (default 300)')
     run.add_argument('program', nargs=argparse.REMAINDER, help='-- executable arguments')
+    docker = commands.add_parser('docker', help='Scan a Docker container log snapshot through the current Docker context')
+    docker.add_argument('container', help='Container name or ID')
+    docker.add_argument('--tail', default='1000', help='Last N lines per stream, or all (default 1000)')
+    docker.add_argument('--since', help='Logs since a duration or timestamp, e.g. 1h')
+    docker.add_argument('--until', help='Logs before a duration or timestamp')
+    docker.add_argument('--timeout', type=float, default=60, help='Docker retrieval timeout in seconds')
     repair = commands.add_parser('fix', help='Preview Python logging repairs; --apply writes changes')
     repair.add_argument('source')
     repair.add_argument('--apply', action='store_true')
     serve_parser = commands.add_parser('serve', help='Host a report and custom-rules editor on localhost')
     serve_parser.add_argument('report', nargs='?')
     serve_parser.add_argument('--port', type=int, default=8000)
+    serve_parser.add_argument('--bind', choices=['127.0.0.1', '0.0.0.0'], default='127.0.0.1', help='Use 0.0.0.0 inside Docker with a loopback-only published port')
     serve_parser.add_argument('--root', help='Workspace root allowed for browser scans (default config directory or cwd)')
     serve_parser.add_argument('--status', help='Guard status file (default ROOT/.logveil/guard-status.json)')
-    for command in (scan, run, repair, serve_parser):
+    for command in (scan, run, docker, repair, serve_parser):
         command.add_argument('--config', help='Project JSON settings (default ./logveil.json if present)')
         command.add_argument('--rules', help='Custom rules JSON; overrides environment and project settings')
-    for command in (scan, run):
+    for command in (scan, run, docker):
         command.add_argument('--json', action='store_true')
         command.add_argument('--html', metavar='PATH')
         command.add_argument('--baseline')
@@ -108,7 +116,7 @@ def main(argv=None):
         if args.command == 'serve':
             html = args.report or settings.get('html') or 'scan-results.html'
             root = args.root or (str(Path(settings['_file']).parent) if settings.get('_file') else str(Path.cwd()))
-            return serve(html, args.port, rule_path or str(Path(root) / 'logveil-rules.json'), root, args.status)
+            return serve(html, args.port, rule_path or str(Path(root) / 'logveil-rules.json'), root, args.status, args.bind)
         token = ACTIVE_RULES.set(load_rules(rule_path) if rule_path else get_rules())
         if args.command == 'fix':
             changes = fix(args.source, args.apply)
@@ -118,7 +126,10 @@ def main(argv=None):
             if rule_path:
                 print('For custom masking, set LOGVEIL_RULES to the same rules file when launching your application.')
             return 0
-        if args.command == 'run':
+        if args.command == 'docker':
+            print('logVeil is fetching Docker logs; raw output is not echoed or saved.', file=sys.stderr)
+            findings, summary = scan_docker(args.container, tail=args.tail, since=args.since, until=args.until, timeout=args.timeout)
+        elif args.command == 'run':
             program = args.program[1:] if args.program[:1] == ['--'] else args.program
             print('logVeil is capturing stdout/stderr; raw output is not echoed or saved.', file=sys.stderr)
             findings, summary = scan_command(program, args.timeout)

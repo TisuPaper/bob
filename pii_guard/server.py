@@ -10,9 +10,11 @@ from .rules_editor import save_rules
 from .workspace import Workspace
 
 
-def report_server(path, port=8000, rules_path='rules/custom.json', root=None, status_path=None):
+def report_server(path, port=8000, rules_path='rules/custom.json', root=None, status_path=None, bind='127.0.0.1'):
     if not 0 <= port <= 65535:
         raise ValueError('Port must be between 0 and 65535')
+    if bind not in {'127.0.0.1', '0.0.0.0'}:
+        raise ValueError('Unsupported bind address')
     workspace = Workspace(root or Path.cwd(), path, rules_path, status_path)
     token = secrets.token_urlsafe(32)
     assets = files('pii_guard').joinpath('assets')
@@ -80,7 +82,7 @@ def report_server(path, port=8000, rules_path='rules/custom.json', root=None, st
                 self.json_response({'error': 'Request not authorised. Reload the workspace.'}, 403)
                 return
             route = urlsplit(self.path).path
-            if route not in {'/api/rules/validate', '/api/rules/save', '/api/rules/test', '/api/scan'}:
+            if route not in {'/api/rules/validate', '/api/rules/save', '/api/rules/test', '/api/scan', '/api/docker/scan'}:
                 self.send_error(404)
                 return
             if self.headers.get('Content-Type') != 'application/json':
@@ -94,9 +96,12 @@ def report_server(path, port=8000, rules_path='rules/custom.json', root=None, st
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError('Expected an object')
-                if route == '/api/scan':
+                if route in {'/api/scan', '/api/docker/scan'}:
                     try:
-                        workspace.start_scan(payload.get('paths'), payload.get('mode', 'auto'))
+                        if route == '/api/docker/scan':
+                            workspace.start_docker_scan(payload.get('container'), payload.get('tail', '1000'), payload.get('since'))
+                        else:
+                            workspace.start_scan(payload.get('paths'), payload.get('mode', 'auto'))
                     except ValueError as exc:
                         self.json_response({'error': str(exc)}, 400)
                         return
@@ -136,11 +141,11 @@ def report_server(path, port=8000, rules_path='rules/custom.json', root=None, st
         def log_message(self, format, *args):
             pass
 
-    return ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    return ThreadingHTTPServer((bind, port), Handler)
 
 
-def serve(path, port=8000, rules_path='rules/custom.json', root=None, status_path=None):
-    with report_server(path, port, rules_path, root, status_path) as server:
+def serve(path, port=8000, rules_path='rules/custom.json', root=None, status_path=None, bind='127.0.0.1'):
+    with report_server(path, port, rules_path, root, status_path, bind) as server:
         print(f'Open workspace: http://localhost:{server.server_port}/', flush=True)
         print(f'Protection setup: http://localhost:{server.server_port}/protection', flush=True)
         print('Press Ctrl+C to stop.', flush=True)

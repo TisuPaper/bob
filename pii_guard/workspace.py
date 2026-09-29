@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import threading
+from .docker_logs import docker_command, scan_docker
 from .detectors import ACTIVE_RULES, load_rules, parse_rules, redact
 from .guard import atomic_json
 from .inputs import discover
@@ -105,22 +106,37 @@ class Workspace:
         thread.start()
         return thread
 
-    def _scan(self, requests):
+    def start_docker_scan(self, container, tail='1000', since=None):
+        docker_command(container, tail=tail, since=since)
+        with self.lock:
+            if self.running:
+                raise ValueError('A scan is already running')
+            self.running, self.error = True, None
+        thread = threading.Thread(target=self._scan, args=([], {'container': container, 'tail': tail, 'since': since}), daemon=True)
+        thread.start()
+        return thread
+
+    def _scan(self, requests, docker=None):
         token = None
         try:
             with self.lock:
                 config, _ = self.read_rules()
             token = ACTIVE_RULES.set(parse_rules(config))
-            files, skipped = discover(requests, ignored=[self.rules, self.report, result_path(self.report), self.status_path, self.root / 'logveil.json'])
-            summary = {'files_scanned': len(files), 'streams_scanned': 0, 'log_lines': 0, 'skipped_files': skipped}
-            findings = []
-            for file, mode in files:
-                findings.extend(static_scan(file) if mode == 'python' else log_scan(file, summary))
+            if docker:
+                findings, summary = scan_docker(**docker)
+            else:
+                files, skipped = discover(requests, ignored=[self.rules, self.report, result_path(self.report), self.status_path, self.root / 'logveil.json'])
+                summary = {'files_scanned': len(files), 'streams_scanned': 0, 'log_lines': 0, 'skipped_files': skipped}
+                findings = []
+                for file, mode in files:
+                    findings.extend(static_scan(file) if mode == 'python' else log_scan(file, summary))
             self.report.parent.mkdir(parents=True, exist_ok=True)
             write_html(self.report, findings, summary=summary)
             result = save_result(self.report, findings, summary)
             with self.lock:
                 self.result = result
+                if summary.get('command_exit_code', 0) != 0:
+                    self.error = 'Docker log retrieval failed. Check Docker is running, the context, container name and logging driver. This is not a clean scan.'
         except Exception:
             with self.lock:
                 self.error = 'Scan incomplete. Check the path, rules, file permissions, encoding and input limits. Previous results are unchanged.'
